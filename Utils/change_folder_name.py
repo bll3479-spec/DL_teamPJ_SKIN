@@ -44,10 +44,9 @@ name_map = {
 # print(new_name)
 
 #4단계: 전체 폴더 순회하며 이름 변경점 확인
+base_path = r'./Data/Validation/01_Source_Data'
 
-base_path = r'./Data/Training/02_Labeling_Data'
-
-for item in TL:
+for item in VS:
     prefix, korean = item.split('_', 1)
     english = name_map[korean]
     new_name = f'{prefix}_{english}'
