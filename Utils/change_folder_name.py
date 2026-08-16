@@ -1,4 +1,5 @@
 import os
+# 경로를 우선 체크할 것: Utils에 추가하기 전 작업 흔적임. 상대 경로로 따왔기에 필요시 재확인 요망.
 
 # 폴더명을 바꿀 대상의 경로 가져오기
 TS = os.listdir(r'./Data/Training/01_Source_Data')
