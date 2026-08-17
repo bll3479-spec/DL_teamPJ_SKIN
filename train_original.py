@@ -1,7 +1,11 @@
 import torch
+import torch.nn as nn
+from torchvision import models
 from torchvision import datasets, transforms
-
 from torch.utils.data import DataLoader
+
+from model import bulid_model
+
 
 #transform 정의
 transform = transforms.Compose([
@@ -15,10 +19,15 @@ transform = transforms.Compose([
 train_dir = r'./Data/Training/01_Source_Data'
 train_dataset = datasets.ImageFolder(root=train_dir, transform = transform)
 
-print(train_dataset.classes)
-print(len(train_dataset))
-
-print(train_dataset[0])
+# print(train_dataset.classes)
+# print(len(train_dataset))
+# print(train_dataset[0])
 
 #Dataloder 만들기
 train_loader = DataLoader(train_dataset, batch_size = 32, shuffle = True)
+
+images, labels = next(iter(train_loader))
+#print(images.shape, labels.shape)
+
+model = bulid_model(num_classes=15)
+print(model)
