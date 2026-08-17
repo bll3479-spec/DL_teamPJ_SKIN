@@ -6,6 +6,9 @@ from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
+import wandb
+wandb.init(project="DL_temaPJ_SKIN", name = "ResNet18-original")
+
 from Models.model import bulid_model
 
 
@@ -60,6 +63,7 @@ for epoch in range(num_epochs):
         running_loss += loss.item()
 
     print(f'Epoch {epoch+1}, Loss : {running_loss/len(train_loader):.4f}')
+    wandb.log({"train_loss": running_loss/len(train_loader), "epoch": epoch+1})
 
 #검증 루프
 val_dir = r'./Data/Validation/01_Source_Data'
@@ -80,3 +84,4 @@ with torch.no_grad():
         correct += (predicted == labels).sum().item()
 accuracy = correct / total
 print(f'Validation Accuracy: {accuracy*100:.2f}%')
+wandb.log({"val_accuracy": accuracy})
