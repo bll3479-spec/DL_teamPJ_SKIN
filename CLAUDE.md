@@ -2,8 +2,14 @@
 
 ## 하드웨어 (이 노트북)
 - GPU: Intel(R) Iris(R) Xe Graphics (내장그래픽) — **NVIDIA GPU 없음**
-- Python: 3.11.0 (`py -0p`로 확인, `C:\Users\user\AppData\Local\Programs\Python\Python311\python.exe`)
+- Python: 3.11.0 (`py -0p`로 확인, `C:\Users\user\AppData\Local\Programs\Python\Python311\python.exe`) — 이건 순정 시스템 파이썬, 패키지 미설치 상태.
 - 주의: PATH의 `python` 명령은 Windows Store 스텁을 가리킴. 실제 인터프리터는 `py` 런처로 확인할 것.
+
+## 딥러닝 작업용 Python 환경 (conda `CV`)
+- `torch`/`torchvision` 등 `requirements.txt` 패키지는 **conda 가상환경 `CV`**에 설치되어 있음 (`C:\Users\user\anaconda3\envs\CV\python.exe`, Python 3.11.15).
+- 확인됨: `torch==2.3.1+cpu`, `torch.cuda.is_available() == False` (예상대로, GPU 없으므로 정상).
+- 딥러닝 코드 실행 시 반드시 이 환경 사용: 터미널에서 `conda activate CV` 후 실행, 또는 VS Code에서 인터프리터를 `anaconda3\envs\CV\python.exe`로 선택.
+- 시스템 파이썬(`py`)과 conda `CV` 환경은 별개이므로 혼동 주의 — 패키지 설치/확인은 항상 CV 환경 기준으로 할 것.
 
 ## requirements.txt 이슈 (다른 환경에서 받아온 것)
 - `torch==2.13.0+cu130`, `torchvision==0.28.0+cu130`처럼 버전 뒤에 `+cuXXX`가 붙은 건 **CUDA 빌드 로컬 버전 태그**(PEP 440 local version identifier)로, PyPI가 아니라 PyTorch 전용 인덱스(`download.pytorch.org/whl/cuXXX`)에서만 배포됨.

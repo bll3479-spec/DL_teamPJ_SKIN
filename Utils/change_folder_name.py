@@ -57,3 +57,4 @@ for item in VS:
 #5단계: 이름 바꾸기
     os.rename(old_path, new_path)
     print(old_path, '->', new_path)
+
