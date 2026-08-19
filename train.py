@@ -1,3 +1,4 @@
+import os
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -85,3 +86,6 @@ with torch.no_grad():
 accuracy = correct / total
 print(f'Validation Accuracy: {accuracy*100:.2f}%')
 wandb.log({"val_accuracy": accuracy})
+
+os.makedirs('checkpoints', exist_ok=True)
+torch.save(model.state_dict(), './checkpoints/resnet18_original.pth')

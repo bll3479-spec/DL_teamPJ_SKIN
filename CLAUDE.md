@@ -37,10 +37,10 @@
 ### ResNet18 기반 피부질환 분류 모델
 - **진행 방식**: 사용자가 직접 코드를 작성하고 Claude는 단계별로 코칭/리뷰하는 방식 (Claude가 직접 코드를 짜지 않음).
 - **학습 실행 위치**: 이 노트북에서는 파이프라인 개발 및 소규모 데이터로 동작 테스트만 진행. 전체 데이터(Training 12,000장) 학습은 GPU 있는 환경(팀원 PC/Colab/학교 서버)에서 실행 예정.
-- **이미지 사용 방식**: 두 가지 버전을 별도 `.py` 파일로 구현.
-  - `train_original.py` — **완료 및 검증됨**. `ImageFolder`로 원본 이미지 그대로 사용, 공통 모델 정의는 `Models/model.py`(`build_model(num_classes)` 함수, ResNet18 + ImageNet 사전학습 가중치 + fc레이어 15클래스로 교체)로 분리. 전체 Training 데이터(12,000장) 1 epoch, CPU로 약 12분 소요, **Validation Accuracy 96%**로 파이프라인 정상 동작 확인 완료. `wandb`(`wandb 0.28.2`, CV 환경에 설치됨) 연동 완료 — `wandb.init()` + 학습loss/검증accuracy `wandb.log()` 기록 중.
-  - `train_bbox.py` — **구현 진행 중**. JSON의 bbox로 병변 부분만 크롭해서 사용. `ImageFolder`를 못 쓰므로 `torch.utils.data.Dataset` 상속받은 커스텀 Dataset 클래스 필요. 라벨(JSON)과 이미지 파일은 **파일명(예: `Z4_24006_P0_L0`)으로 매칭**하고 상위 폴더 접두사만 `TL_`↔`TS_`(`VL_`↔`VS_`) 치환해서 이미지 경로 유추 — JSON 안의 `photograph.file_path`(예: `"사마귀/..."`)는 원 제공처 기준 경로라 우리 폴더 구조와 안 맞으므로 사용하지 않음. JSON의 `bbox` 필드(`xpos`, `ypos`, `width`, `height`)로 `PIL Image.crop()` 수행 예정. `model.py`, 학습/검증 루프, wandb 로깅은 `train_original.py`와 최대한 재사용할 예정.
-- 로드맵(완료: 패키지 설치 → ImageFolder → Transform → DataLoader → ResNet18 모델 → Loss/Optimizer → 학습 루프 → 검증 루프 → wandb 연동) → **다음: bbox용 커스텀 Dataset 구현**.
+- **이미지 사용 방식**: 원본 이미지 그대로 사용하는 방식으로 확정 (bbox 크롭 버전은 검토했으나 불필요 판단, 폐기). 파일명도 원래 `train_original.py`였으나 bbox 버전(`train_bbox.py`)이 없어지면서 `train.py`로 변경함.
+  - `train.py` — 파이프라인 자체는 **완료 및 검증됨**. `ImageFolder`로 원본 이미지 그대로 사용, 공통 모델 정의는 `Models/model.py`(`build_model(num_classes)` 함수, ResNet18 + ImageNet 사전학습 가중치 + fc레이어 15클래스로 교체)로 분리. 전체 Training 데이터(12,000장) 1 epoch, CPU로 약 12분 소요, **Validation Accuracy 96%**로 파이프라인 정상 동작 확인. `wandb`(`wandb 0.28.2`, CV 환경에 설치됨) 연동 완료 — `wandb.init()` + 학습loss/검증accuracy `wandb.log()` 기록.
+  - **가중치 저장 코드 추가함**: `os.makedirs('checkpoints', exist_ok=True)` + `torch.save(model.state_dict(), './checkpoints/resnet18_original.pth')` (처음엔 `'chechpoints'` 오타 및 저장 경로 누락 버그 있었으나 수정 완료). **단, 이 노트북에서 실행해서 파일 생성까지 확인하지는 않은 상태** — 사용자가 다른(GPU) 환경에서 실행할 예정이라 이 노트북에는 `checkpoints/` 폴더가 아직 없음.
+- 로드맵(완료: 패키지 설치 → ImageFolder → Transform → DataLoader → ResNet18 모델 → Loss/Optimizer → 학습 루프 → 검증 루프 → wandb 연동 → 가중치 저장 코드 작성) → **다음: 다른(GPU) 환경에서 실제 실행 — 여러 epoch 본 학습 + 가중치 저장 확인**.
 
 ## 딥러닝 코드 실행 관련 팁
 - 스크립트를 `Utils/`나 다른 하위 폴더로 옮겨서 실행할 경우, 코드 안 상대경로(`r'./Data/...'`)는 **스크립트 실행 시점의 현재 작업 디렉토리** 기준이라는 점 주의 (스크립트 파일 위치 기준이 아님). 프로젝트 루트에서 실행해야 정상 작동.
