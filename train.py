@@ -2,54 +2,22 @@ import os
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torchvision import models
-from torchvision import datasets, transforms
-from torch.utils.data import DataLoader
+
 from tqdm import tqdm
 
 import wandb
-wandb.init(project="DL_temaPJ_SKIN", name = "ResNet18-original")
 
-from Models.model import bulid_model
+from evaluate import evaluate
 
 
-#transform 정의
-transform = transforms.Compose([
-    transforms.Resize((224,224)),
-    transforms.ToTensor(),
-    transforms.Normalize(mean = [0.485, 0.456, 0.406], 
-                         std = [0.229,0.224, 0.225])
-])
-
-#ImageFolder로 데이터 불러오기
-train_dir = r'./Data/Training/01_Source_Data'
-train_dataset = datasets.ImageFolder(root=train_dir, transform = transform)
-
-# print(train_dataset.classes)
-# print(len(train_dataset))
-# print(train_dataset[0])
-
-#Dataloder 만들기
-train_loader = DataLoader(train_dataset, batch_size = 32, shuffle = True)
-
-images, labels = next(iter(train_loader))
-#print(images.shape, labels.shape)
-
-model = bulid_model(num_classes=15)
-#print(model)
-
-#손실함수, 최적화 설정
-criterion = nn.CrossEntropyLoss()
-optimizer = optim.Adam(model.parameters(), lr = 0.001)
-
-#학습 루프 
-num_epochs= 5
-
-for epoch in range(num_epochs):
+#학습 파이프라인 구축
+def train_one_epoch(model, train_loader, criterion, optimizer, device):
     model.train()
     running_loss = 0.0
 
     for images, labels in tqdm(train_loader):
+        #이미지, 라벨 -> device
+        images, labels = images.to(device), labels.to(device)
         #1. 기울기 초기화
         optimizer.zero_grad()
         #2. 순전파
@@ -62,30 +30,17 @@ for epoch in range(num_epochs):
         optimizer.step()
 
         running_loss += loss.item()
+    return running_loss/len(train_loader)
 
-    print(f'Epoch {epoch+1}, Loss : {running_loss/len(train_loader):.4f}')
-    wandb.log({"train_loss": running_loss/len(train_loader), "epoch": epoch+1})
-
-#검증 루프
-val_dir = r'./Data/Validation/01_Source_Data'
-val_dataset = datasets.ImageFolder(root=val_dir, transform = transform)
-val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False)
-
-print(len(val_dataset))
-
-model.eval()
-correct, total = 0, 0
-
-with torch.no_grad():
-    for images, labels in tqdm(val_loader):
-        outputs = model(images)
-        _, predicted = torch.max(outputs, 1)
-
-        total += labels.size(0)
-        correct += (predicted == labels).sum().item()
-accuracy = correct / total
-print(f'Validation Accuracy: {accuracy*100:.2f}%')
-wandb.log({"val_accuracy": accuracy})
-
-os.makedirs('checkpoints', exist_ok=True)
-torch.save(model.state_dict(), './checkpoints/resnet18_original.pth')
+#훈련 과정 및 결과 기록
+def fit(model, train_loader, val_loader, criterion, optimizer, device, num_epochs, checkpoint_dir):
+    #가중치 폴더 설정
+    os.makedirs(checkpoint_dir, exist_ok=True)
+    #최고 val_accuracy 추적하며 갱신 위함
+    top_checkpoints = []
+    for epoch in range(num_epochs):
+        avg_loss = train_one_epoch(model, train_loader, criterion, optimizer, device)
+        print(f'Epoch {epoch+1}, Loss : {avg_loss}')
+        wandb.log({"train_loss": avg_loss, "epoch": epoch+1})
+        accuracy, f1 = evaluate(model, val_loader, device, epoch, top_checkpoints, checkpoint_dir)
+    return top_checkpoints

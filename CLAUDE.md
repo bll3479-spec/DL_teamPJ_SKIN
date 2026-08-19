@@ -46,7 +46,13 @@
 
 ### 새 컴퓨터 (GTX 1650, CUDA 가능) 발견
 - 이 CLAUDE.md 상단에 기록된 노트북(Intel Iris Xe, conda `CV` 환경)과는 **다른 컴퓨터**에서 작업 진행함. `nvidia-smi`로 **NVIDIA GeForce GTX 1650** 확인됨 (CUDA 사용 가능).
-- 이 컴퓨터엔 conda 자체가 없음 (`conda` 명령 없음). 시스템 Python 3.12(`C:\Users\user\AppData\Local\Programs\Python\Python312\python.exe`, PATH의 `python`이 이걸 가리킴)에 pip으로 직접 패키지 설치.
+- (2026-08-18 기준) 이 컴퓨터엔 conda 자체가 없었음 (`conda` 명령 없음). 시스템 Python 3.12(`C:\Users\user\AppData\Local\Programs\Python\Python312\python.exe`, PATH의 `python`이 이걸 가리킴)에 pip으로 직접 패키지 설치.
+- **(2026-08-19 업데이트, 정정)** 이후 이 컴퓨터에도 **conda `CV` 환경이 생성됨** (`C:\ProgramData\anaconda3\envs\CV\python.exe`). `requirement_me.txt`(`torch==2.3.1`, `+cu` 태그 없음)를 이 환경에 `pip install -r`로 설치했더니 **CPU 전용 빌드**가 깔려서 `torch.cuda.is_available()==False`가 됨 — 학습 스크립트를 이 환경으로 실행하면 GPU가 있어도 CPU로 돎 (실제로 한 번 이 상태로 15 epoch 학습이 CPU로 돌고 있었던 걸 발견해서 중간에 종료함). CUDA 빌드로 재설치:
+  ```
+  "C:\ProgramData\anaconda3\envs\CV\python.exe" -m pip uninstall torch torchvision -y
+  "C:\ProgramData\anaconda3\envs\CV\python.exe" -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+  ```
+  재설치 후 `torch==2.5.1+cu121`, `cuda_available=True` 확인됨. **이 노트북 시스템 Python(3.12, PATH 기준)과 conda `CV` 환경은 별개의 site-packages를 쓰므로, GPU 학습 시 반드시 어떤 인터프리터로 실행 중인지(`python ./train.py`를 어느 python.exe가 실행하는지) 확인 필요** — 헷갈리기 매우 쉬움 (겉보기엔 같은 `python` 명령이라 구분이 안 됨, `tasklist`/`wmic process ... get CommandLine,ExecutablePath`로 실제 실행 파일 경로를 확인해야 구분 가능).
 - `requirements.txt`는 CPU 전용 태그 없는 버전(`torch==2.3.1` 등)이지만, GPU를 실제로 쓰려면 PyTorch 공식 인덱스에서 CUDA 빌드를 따로 설치해야 함:
   ```
   python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
@@ -82,6 +88,53 @@
 
 - **결론**: 합성데이터 특성상(클래스 내 변동성 낮음) 3~5 epoch 안에 val accuracy가 97~99%대로 수렴함. 실행마다(랜덤 초기화/셔플) 어느 epoch이 peak인지는 달라지지만(3 epoch vs 5 epoch), 5 epoch이면 baseline 성능은 충분히 확보됨. 추가 개선이 필요하면 epoch 수보다 augmentation/backbone 비교에 투자하는 게 나음.
 - 참고: `num_epochs`는 실험 후 `5`로 남아있고, device 처리(`.to(device)`) 및 epoch별 검증 구조는 실험 이후 원본 구조(학습 전 이 CLAUDE.md 파일 상단에 설명된, 검증이 루프 밖에서 한 번만 도는 구조)로 되돌아간 상태 — 다음에 GPU로 epoch별 비교 실험을 다시 하려면 위 "GPU 학습 시 코드에 device 처리 필요" 내용을 다시 적용해야 함.
+
+## 세션 기록 (2026-08-19) — 파이프라인 모듈화, 버그 수정, 평가지표 확장
+
+### 작업 방식 관련 (중요)
+- 이 세션 초반에 Claude가 코드를 직접 작성/수정한 적이 있었는데, 사용자가 즉시 강하게 지적함 ("왜 너가 코드 짜 코드는 내가 입력할거야 다시 원상복구해") → 바로 원복함. **이 프로젝트의 "코드는 사용자가 직접 작성, Claude는 코칭/리뷰만" 원칙(이 문서 상단 ResNet18 섹션에 이미 명시)이 재확인됨.** 이후 세션 전체에서 Claude는 코드를 직접 고치지 않고, 어느 줄에 뭘 어떻게 고칠지 구체적으로 짚어주는 방식으로만 진행함 (CLAUDE.md 갱신처럼 사용자가 명시적으로 요청한 문서 작업은 예외).
+
+### GPU 환경에서 CPU로 학습되고 있던 문제 발견 및 해결
+- `train.py`를 GPU 머신에서 실행했는데 `nvidia-smi` 확인 결과 GPU 사용률이 계속 4~5%, 프로세스 목록에도 안 잡힘 → 실제로는 conda `CV` 환경(`C:\ProgramData\anaconda3\envs\CV\python.exe`)의 CPU 전용 torch로 돌고 있었음. 위 "새 컴퓨터" 섹션에 정정 기록. CUDA 빌드 재설치 후 `nvidia-smi dmon`으로 클럭이 idle(300MHz)에서 boost(1800MHz대)로 올라가는 것까지 확인해서 GPU 사용 확정.
+- 학습 속도 추정: wandb `output.log`에서 tqdm 진행률(예: 202/375 batches, 2.11 it/s) 읽어서 전체 소요시간 역산하는 방법 사용 — batch 수 × epoch 수 ÷ it/s로 계산.
+
+### 코드 구조 리팩토링 (진행자: 사용자, Claude는 리뷰만)
+기존에 `train.py` 하나에 다 있던 코드를 아래처럼 모듈화함:
+- `Utils/dataloader.py` — `get_dataloaders(train_dir, val_dir, batch_size, num_workers=4)`: transform 정의 + `ImageFolder` + `DataLoader` 생성, `(train_loader, val_loader)` 반환
+- `evaluate.py` — `evaluate(model, val_loader, device, epoch, top_checkpoints, checkpoint_dir)`: 검증 루프 + accuracy/f1 계산 + top-3 체크포인트 저장/삭제 관리, `(accuracy, f1)` 반환
+- `train.py` — `train_one_epoch(model, train_loader, criterion, optimizer, device)`(1 epoch 학습, avg_loss 반환) + `fit(model, train_loader, val_loader, criterion, optimizer, device, num_epochs, checkpoint_dir)`(epoch 루프 오케스트레이션, `train_one_epoch`+`evaluate` 호출, wandb 로깅). **함수 정의만 있고 최상위 실행 코드는 없음** (import해도 부수효과 없음)
+- `Models/model.py` — 기존 `bulid_model(num_classes)` 그대로
+- `main.py` — 실제 진입점. `if __name__ == '__main__':` 블록 안에서 `wandb.init()` → `get_dataloaders()` → `bulid_model()`/`device`/`criterion`/`optimizer` 생성 → `fit()` 호출까지 조립
+
+리팩토링 중 반복적으로 나왔던 버그 패턴(다음에 비슷한 리팩토링할 때 참고):
+- **함수가 파라미터를 받아놓고 본문에서 하드코딩된 값으로 덮어쓰거나 무시하는 패턴**이 여러 번 나옴 (`get_dataloaders`의 `train_dir`/`val_dir`/`batch_size`, `evaluate`의 `checkpoint_dir`, `Utils/dataloader.py`의 `num_workers`가 각각 한 번씩 이 패턴으로 버그였음) — 파라미터 추가할 때 본문에서 실제로 그 이름을 쓰는지 항상 재확인 필요
+- **`os.makedirs`가 실제 저장 시점보다 늦게(또는 루프 밖) 호출**되어 `FileNotFoundError` 나는 패턴이 2번 발생 — 폴더 생성은 첫 저장 이전, 루프 진입 전에 위치해야 함
+- **함수 리팩토링 후 반환값 형태가 바뀌었는데 호출부가 그대로인 경우**(`get_dataloaders`에 `return` 누락, `evaluate`가 나중에 `accuracy` 하나에서 `(accuracy, f1)` 튜플로 바뀌었는데 `train.py`가 처음엔 언패킹 안 함) — 함수 시그니처/반환값 바꿀 때마다 모든 호출부를 같이 확인해야 함
+- **모듈을 함수 전용으로 만들다가 최상위 실행 코드(`wandb.init`, 모델 생성, 함수 호출)를 못 옮기고 남겨둬서, 다른 파일에서 `import`할 때 그 코드가 부수효과로 실행돼버리는 문제**가 있었음 — `train.py`를 최종적으로 "함수 정의만 있는 모듈"로 정리하고 나서야 해결
+- `Windows`에서 `torch.device` 오탈자, `f'./checkpoints/resent18...'`처럼 `resnet18`→`resent18` 오타, `val_dir`을 실수로 `Training` 경로로 복붙, `avg_loss`를 `train_one_epoch` 반환값(이미 평균) 위에서 `fit()`이 또 `len(train_loader)`로 나눠서 이중 나눗셈되는 버그, `if __name__ == ' __main__':`처럼 문자열에 공백이 섞여 조건이 항상 False가 되는 오타 등도 발견해서 수정함
+
+### 평가지표: accuracy → accuracy + F1(macro) 추가
+- `evaluate.py`에 `sklearn.metrics`의 `accuracy_score`, `f1_score(average='macro')` 추가. 클래스가 완전 균등(Training 800장/클래스, Validation 100장/클래스)이라 accuracy와 macro F1이 실제로는 비슷하게 움직이지만, 클래스 불균형에 더 강건한 지표라 **top-3 체크포인트 랭킹 기준을 f1으로 통일**하기로 결정함 (accuracy도 wandb 로그·파일명엔 같이 남김).
+- 두 지표를 동시에 랭킹 기준으로 쓰면 "어느 게 더 나은 epoch인지" 판단이 모호해지므로, 랭킹 기준은 항상 하나로 고정하는 게 낫다는 결론 (참고용 지표는 여러 개 로깅해도 무방).
+
+### AI Hub 원본 데이터셋(전체 15,000장, 8:1:1 분할) baseline과 비교
+- 출처: https://aihub.or.kr/aihubdata/data/view.do?currMenu=115&topMenu=100&dataSetSn=71864 ("피부종양 이미지 합성 데이터", 15종, 클래스당 1,000장)
+- AI Hub 제시 baseline: ResNet101(15종 분류, image_size=256, epoch=10, dropout=0.5), EfficientNet-B3(양성/악성 이진분류, image_size=256, epoch=16, dropout=0.3) — 둘 다 batch_size=32, lr=0.001, Adam, 8:1:1 분할
+- 우리 프로젝트는 ResNet18(더 경량), image_size=224, dropout 없음, train/val 2분할만(test set 없음) 사용 — 저사양 환경 제약 때문으로 추정. batch_size/lr/optimizer는 baseline과 동일.
+
+### 현재 프로젝트의 Data 폴더 상세 구조 (재확인)
+```
+Data/Training/01_Source_Data/TS_<class>/   각 800장 (15클래스 × 800 = 12,000장)
+Data/Training/02_Labeling_Data/TL_<class>/ (이미지와 1:1 대응 JSON)
+Data/Validation/01_Source_Data/VS_<class>/ 각 100장 (15클래스 × 100 = 1,500장)
+Data/Validation/02_Labeling_Data/VL_<class>/
+```
+- Training:Validation 클래스당 비율 8:1로 균등, `ImageFolder` 구조에 그대로 부합
+
+### predict.py는 아직 미구현 (선택사항으로 결론)
+- 현재 `evaluate()`가 학습 루프 안에서 이미 예측(argmax)과 top-3 가중치 저장을 수행하므로, "학습 + 좋은 가중치 확보"라는 목적 자체는 이미 충족됨.
+- 별도 `predict.py`는 ① 저장된 `.pth`를 실제로 다시 로드해도 잘 동작하는지 검증(왕복 테스트, 아직 한 번도 안 해봄), ② confusion matrix 등 accuracy/f1 숫자 이상의 세부 진단 정보 확보 용도로 필요할 때 추가하기로 함. 급하지 않음.
+- Validation 셋을 학습 중 top-3 체크포인트 선택에도 이미 쓰고 있어서, 같은 셋으로 predict까지 하면 완전히 독립적인 최종 평가는 아님(선택 편향 가능성) — 별도 test 셋은 없는 상태(AI Hub 원본은 8:1:1이었지만 이 프로젝트는 2분할로 확정한 것, 위 참고).
 
 ## 딥러닝 코드 실행 관련 팁
 - 스크립트를 `Utils/`나 다른 하위 폴더로 옮겨서 실행할 경우, 코드 안 상대경로(`r'./Data/...'`)는 **스크립트 실행 시점의 현재 작업 디렉토리** 기준이라는 점 주의 (스크립트 파일 위치 기준이 아님). 프로젝트 루트에서 실행해야 정상 작동.
