@@ -42,6 +42,47 @@
   - **가중치 저장 코드 추가함**: `os.makedirs('checkpoints', exist_ok=True)` + `torch.save(model.state_dict(), './checkpoints/resnet18_original.pth')` (처음엔 `'chechpoints'` 오타 및 저장 경로 누락 버그 있었으나 수정 완료). **단, 이 노트북에서 실행해서 파일 생성까지 확인하지는 않은 상태** — 사용자가 다른(GPU) 환경에서 실행할 예정이라 이 노트북에는 `checkpoints/` 폴더가 아직 없음.
 - 로드맵(완료: 패키지 설치 → ImageFolder → Transform → DataLoader → ResNet18 모델 → Loss/Optimizer → 학습 루프 → 검증 루프 → wandb 연동 → 가중치 저장 코드 작성) → **다음: 다른(GPU) 환경에서 실제 실행 — 여러 epoch 본 학습 + 가중치 저장 확인**.
 
+## GPU 환경 세션 기록 (2026-08-18)
+
+### 새 컴퓨터 (GTX 1650, CUDA 가능) 발견
+- 이 CLAUDE.md 상단에 기록된 노트북(Intel Iris Xe, conda `CV` 환경)과는 **다른 컴퓨터**에서 작업 진행함. `nvidia-smi`로 **NVIDIA GeForce GTX 1650** 확인됨 (CUDA 사용 가능).
+- 이 컴퓨터엔 conda 자체가 없음 (`conda` 명령 없음). 시스템 Python 3.12(`C:\Users\user\AppData\Local\Programs\Python\Python312\python.exe`, PATH의 `python`이 이걸 가리킴)에 pip으로 직접 패키지 설치.
+- `requirements.txt`는 CPU 전용 태그 없는 버전(`torch==2.3.1` 등)이지만, GPU를 실제로 쓰려면 PyTorch 공식 인덱스에서 CUDA 빌드를 따로 설치해야 함:
+  ```
+  python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+  ```
+  → 설치 결과: `torch==2.5.1+cu121`, `torch.cuda.is_available() == True`, `torch.cuda.get_device_name(0) == "NVIDIA GeForce GTX 1650"`.
+- `wandb`는 `requirements.txt`에 없지만 `train_original.py`가 사용하므로 별도 설치 필요 (`pip install wandb`). 이 컴퓨터에서 `wandb login <API key>`로 로그인 완료, 프로젝트: https://wandb.ai/bll3479-/DL_temaPJ_SKIN (계정 `bll3479`).
+
+### GPU 학습 시 코드에 device 처리 필요
+- `train_original.py` 원본에는 `.to(device)`가 전혀 없어서, GPU 환경이어도 기본 상태로는 그냥 CPU로 돌아감.
+- GPU를 실제로 쓰려면 `device = torch.device("cuda" if torch.cuda.is_available() else "cpu")`를 만들고 `model`과 각 배치의 `images`/`labels`를 `.to(device)`로 옮기는 코드가 필요함 (현재 파일엔 반영 안 돼 있음 — 다시 GPU로 돌릴 때 매번 추가해야 함).
+- 검증(validation)도 원본 구조는 전체 epoch 학습이 끝난 뒤 딱 한 번만 실행됨 → epoch별로 val accuracy를 비교하려면 검증 루프를 epoch for문 안으로 옮기고 `wandb.log`도 `{"epoch", "train_loss", "val_accuracy"}`로 합쳐서 한 번에 기록해야 함 (몇 epoch이 최적인지 판단하려면 필수).
+
+### Epoch 튜닝 실험 결과 (전체 Training 12,000장 / 전체 Validation, GTX 1650, ResNet18 전이학습, lr=0.001, 5 epoch)
+- 실행 1회차 (wandb 미연결, 콘솔 로그만):
+
+  | Epoch | Train Loss | Val Accuracy |
+  |---|---|---|
+  | 1 | 0.2231 | 97.33% |
+  | 2 | 0.1061 | 97.00% |
+  | 3 | 0.0694 | 98.13% (peak) |
+  | 4 | 0.0649 | 97.87% |
+  | 5 | 0.0599 | 96.80% |
+
+- 실행 2회차 (wandb 연결, run: `ResNet18-original` / `4aar6mm4`):
+
+  | Epoch | Train Loss | Val Accuracy |
+  |---|---|---|
+  | 1 | 0.2422 | 80.00% |
+  | 2 | 0.0924 | 95.53% |
+  | 3 | 0.0829 | 97.53% |
+  | 4 | 0.0585 | 97.73% |
+  | 5 | 0.0572 | 99.47% (peak) |
+
+- **결론**: 합성데이터 특성상(클래스 내 변동성 낮음) 3~5 epoch 안에 val accuracy가 97~99%대로 수렴함. 실행마다(랜덤 초기화/셔플) 어느 epoch이 peak인지는 달라지지만(3 epoch vs 5 epoch), 5 epoch이면 baseline 성능은 충분히 확보됨. 추가 개선이 필요하면 epoch 수보다 augmentation/backbone 비교에 투자하는 게 나음.
+- 참고: `num_epochs`는 실험 후 `5`로 남아있고, device 처리(`.to(device)`) 및 epoch별 검증 구조는 실험 이후 원본 구조(학습 전 이 CLAUDE.md 파일 상단에 설명된, 검증이 루프 밖에서 한 번만 도는 구조)로 되돌아간 상태 — 다음에 GPU로 epoch별 비교 실험을 다시 하려면 위 "GPU 학습 시 코드에 device 처리 필요" 내용을 다시 적용해야 함.
+
 ## 딥러닝 코드 실행 관련 팁
 - 스크립트를 `Utils/`나 다른 하위 폴더로 옮겨서 실행할 경우, 코드 안 상대경로(`r'./Data/...'`)는 **스크립트 실행 시점의 현재 작업 디렉토리** 기준이라는 점 주의 (스크립트 파일 위치 기준이 아님). 프로젝트 루트에서 실행해야 정상 작동.
 - `.py` 파일을 터미널에서 실행할 때는 Jupyter/REPL과 달리 `print()` 없이 값만 써두면 화면에 아무것도 안 뜸.
